@@ -6,9 +6,13 @@ import RightPanel from "@/components/RightPanel";
 import RecentOfframpsTable from "@/components/RecentOfframpsTable";
 import ProgressSteps from "@/components/ProgressSteps";
 import { TransactionProgressModal } from "@/components/TransactionProgressModal";
+import { Header } from "@/components/Header";
 import { OfframpStep } from "@/types/stellaramp";
+import { useStellarWallet } from "@/hooks/useStellarWallet";
+import { TransactionStorage, type Transaction } from "@/lib/transaction-storage";
 
 export default function Home() {
+  const { wallet } = useStellarWallet();
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [amount, setAmount] = useState("");
@@ -17,6 +21,8 @@ export default function Home() {
   
   // Test state for modal
   const [modalStep, setModalStep] = useState<OfframpStep>("idle");
+  const [currentPayload, setCurrentPayload] = useState<OfframpPayload | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
 
   const handleConnect = useCallback(() => {
     setIsConnecting(true);
@@ -33,23 +39,58 @@ export default function Home() {
     setQuote(null);
   }, []);
 
-  const handleSubmit = useCallback(async (_payload: OfframpPayload) => {
-    // Show modal for testing
+  const handleSubmit = useCallback(async (payload: OfframpPayload) => {
+    if (!wallet?.publicKey) {
+      setErrorMessage("Wallet not connected");
+      setModalStep("error");
+      return;
+    }
+
+    setCurrentPayload(payload);
+    setErrorMessage(undefined);
     setModalStep("initiating");
     
-    // Simulate flow
-    const flow: OfframpStep[] = ["awaiting-signature", "submitting", "processing", "settling", "success"];
-    for (const step of flow) {
-      await new Promise(r => setTimeout(r, 1500));
-      setModalStep(step);
+    try {
+      // Simulate flow
+      const flow: OfframpStep[] = ["awaiting-signature", "submitting", "processing", "settling", "success"];
+      for (const step of flow) {
+        await new Promise(r => setTimeout(r, 1500));
+        setModalStep(step);
+      }
+
+      // Save transaction to localStorage on success
+      const transaction: Transaction = {
+        id: TransactionStorage.generateId(),
+        timestamp: Date.now(),
+        userAddress: wallet.publicKey,
+        amount: payload.amount,
+        currency: payload.currency,
+        beneficiary: {
+          institution: payload.institution,
+          accountIdentifier: payload.accountIdentifier,
+          accountName: payload.accountName,
+          currency: payload.currency,
+        },
+        status: "completed",
+      };
+      TransactionStorage.save(transaction);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Transaction failed";
+      setErrorMessage(message);
+      setModalStep("error");
     }
-  }, []);
+  }, [wallet?.publicKey]);
 
   return (
     <main className="min-h-screen p-4 bg-[#0a0a0a]">
       <TransactionProgressModal 
-        step={modalStep} 
-        onClose={() => setModalStep("idle")} 
+        step={modalStep}
+        errorMessage={errorMessage}
+        onClose={() => {
+          setModalStep("idle");
+          setCurrentPayload(null);
+          setErrorMessage(undefined);
+        }} 
       />
       
       <Header
