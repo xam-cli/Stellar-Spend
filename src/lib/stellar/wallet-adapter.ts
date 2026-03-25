@@ -37,10 +37,6 @@ const MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
 
 // ── Error helpers ──────────────────────────────────────────────────────────────
 
-/**
- * Normalises any thrown value or API error object into a user-friendly Error
- * without leaking internal stack traces or raw API messages.
- */
 function friendlyError(raw: unknown, fallback: string): Error {
   if (!raw) return new Error(fallback);
   if (typeof raw === "object" && "message" in raw) {
@@ -62,10 +58,6 @@ function friendlyError(raw: unknown, fallback: string): Error {
 
 // ── Lobstr provider interface ──────────────────────────────────────────────────
 
-/**
- * Minimal interface that both window.lobstr and window.stellar (when isLobstr)
- * must satisfy. Validated before any call is made.
- */
 interface LobstrProvider {
   connect(): Promise<{ publicKey: string }>;
   signTransaction(
@@ -74,25 +66,17 @@ interface LobstrProvider {
   ): Promise<{ signedXdr: string }>;
 }
 
-/**
- * Resolves the Lobstr provider from the window object and validates that it
- * exposes the required interface. Returns null if unavailable or malformed.
- */
 function resolveLobstrProvider(): LobstrProvider | null {
   if (typeof window === "undefined") return null;
   const w = window as any;
-
   const candidate: unknown = w.lobstr ?? (w.stellar?.isLobstr ? w.stellar : null);
   if (!candidate || typeof candidate !== "object") return null;
-
-  // Validate the provider exposes the methods we need before calling them.
   if (
     typeof (candidate as any).connect !== "function" ||
     typeof (candidate as any).signTransaction !== "function"
   ) {
     return null;
   }
-
   return candidate as LobstrProvider;
 }
 
@@ -103,10 +87,11 @@ export class StellarWalletAdapter {
   private _publicKey: string | null = null;
 
 
-  // Serialises concurrent connectFreighter() / connectLobstr() calls.
+  // Serialises concurrent connection calls across both connectAuto,
+  // connectFreighter, and connectLobstr.
   private _connectingPromise: Promise<StellarWallet> | null = null;
 
-  // ── Availability ─────────────────────────────────────────────────────────────
+  // ── Availability ──────────────────────────────────────────────────────────────
 
   // Serialises concurrent connectFreighter() calls so only one permission
   // prompt is ever in-flight at a time.
@@ -142,6 +127,23 @@ export class StellarWalletAdapter {
   isLobstrAvailable(): boolean {
 
     return resolveLobstrProvider() !== null;
+  }
+
+  // ── Freighter connection ──────────────────────────────────────────────────────
+
+  connectFreighter(): Promise<StellarWallet> {
+    if (this._walletType === "freighter" && this._publicKey) {
+      return Promise.resolve({
+        type: "freighter",
+        publicKey: this._publicKey,
+        isConnected: true,
+      });
+    }
+    if (this._connectingPromise) return this._connectingPromise;
+    this._connectingPromise = this._doConnectFreighter().finally(() => {
+      this._connectingPromise = null;
+    });
+    return this._connectingPromise;
 
     return (
 
@@ -155,18 +157,7 @@ export class StellarWalletAdapter {
   }
 
 
-  // ── Freighter connection ──────────────────────────────────────────────────────
-
-  async connectFreighter(): Promise<StellarWallet> {
-    if (this._walletType === "freighter" && this._publicKey) {
-      return { type: "freighter", publicKey: this._publicKey, isConnected: true };
-    }
-
-    if (this._connectingPromise) return this._connectingPromise;
-
-    this._connectingPromise = this._doConnectFreighter().finally(() => {
-      this._connectingPromise = null;
-    });
+  private async _doConnectFreighter(): Promise<StellarWallet> {
 
   // ── Freighter connection ───────────────────────────────────────────────────
 
@@ -233,106 +224,6 @@ export class StellarWalletAdapter {
       }
     }
 
-    const accessResult = await freighterApi.requestAccess();
-    if (accessResult.error) {
-      throw friendlyError(
-        accessResult.error,
-        "Freighter access was denied. Please approve the connection request and try again."
-      );
-    }
-    if (accessResult.address) {
-      return this._store("freighter", accessResult.address);
-    }
-
-    const retryResult = await freighterApi.getAddress();
-    if (retryResult.error) {
-      throw friendlyError(
-        retryResult.error,
-        "Connected to Freighter but could not retrieve your public key. Please try again."
-      );
-    }
-    if (!retryResult.address) {
-      throw new Error(
-        "Connected to Freighter but no public key was returned. " +
-          "Ensure your wallet is unlocked and try again."
-      );
-    }
-    return this._store("freighter", retryResult.address);
-  }
-
-  // ── Lobstr connection ─────────────────────────────────────────────────────────
-
-
-  /**
-   * Deterministic Lobstr connection flow:
-   *
-   * 1. Resolve and validate the provider (window.lobstr or window.stellar when
-   *    isLobstr is truthy). Fail immediately if neither is present or if the
-   *    provider does not expose the required interface.
-   * 2. Return immediately (no provider call) if already connected on this instance.
-   * 3. Collapse concurrent calls into a single in-flight promise so connect()
-   *    is never called twice simultaneously.
-   * 4. Call provider.connect() and validate the returned object contains a
-   *    non-empty publicKey string.
-   * 5. Store walletType + publicKey on the instance.
-   */
-  connectLobstr(): Promise<StellarWallet> {
-    // Idempotent: already connected.
-    if (this._walletType === "lobstr" && this._publicKey) {
-      return Promise.resolve({
-        type: "lobstr",
-        publicKey: this._publicKey,
-        isConnected: true,
-      });
-    }
-
-    // Race-condition guard: collapse concurrent calls.
-    if (this._connectingPromise) return this._connectingPromise;
-
-    this._connectingPromise = this._doConnectLobstr().finally(() => {
-      this._connectingPromise = null;
-    });
-    return this._connectingPromise;
-  }
-
-  private async _doConnectLobstr(): Promise<StellarWallet> {
-    // Step 1 — resolve and validate provider.
-    const provider = resolveLobstrProvider();
-    if (!provider) {
-      throw new Error(
-        "Lobstr wallet is not installed or unavailable. " +
-          "Visit https://lobstr.co to install it."
-      );
-    }
-
-    // Step 2 — call connect() and handle all failure modes.
-    let result: { publicKey: string };
-    try {
-      result = await provider.connect();
-    } catch (err: unknown) {
-      throw friendlyError(
-        err,
-        "Failed to connect to Lobstr. Please try again."
-      );
-    }
-
-    // Step 3 — validate the response shape.
-    if (!result || typeof result !== "object") {
-      throw new Error(
-        "Lobstr returned an unexpected response. Please try again."
-      );
-    }
-
-    const publicKey = (result as any).publicKey;
-    if (typeof publicKey !== "string" || publicKey.trim() === "") {
-      throw new Error(
-        "Lobstr did not return a valid public key. " +
-          "Ensure your wallet is unlocked and try again."
-      );
-    }
-
-    // Step 4 — store and return.
-    return this._store("lobstr", publicKey.trim());
 
     // Step 2 — check whether this origin is already connected/allowed.
     const connectedResult = await freighterApi.isConnected();
@@ -354,6 +245,7 @@ export class StellarWalletAdapter {
     }
 
     // Step 4 — request permission / unlock prompt.
+
     const accessResult = await freighterApi.requestAccess();
     if (accessResult.error) {
       throw friendlyError(
@@ -362,13 +254,11 @@ export class StellarWalletAdapter {
       );
     }
 
-    // Step 5 — prefer the address returned by requestAccess directly.
     if (accessResult.address) {
       return this._store("freighter", accessResult.address);
     }
 
 
-    // Step 6 — final fallback: re-fetch address after access was granted.
     const retryResult = await freighterApi.getAddress();
     if (retryResult.error) {
       throw friendlyError(
@@ -384,6 +274,105 @@ export class StellarWalletAdapter {
     }
 
     return this._store("freighter", retryResult.address);
+  }
+
+  // ── Lobstr connection ─────────────────────────────────────────────────────────
+
+  connectLobstr(): Promise<StellarWallet> {
+    if (this._walletType === "lobstr" && this._publicKey) {
+      return Promise.resolve({
+        type: "lobstr",
+        publicKey: this._publicKey,
+        isConnected: true,
+      });
+    }
+    if (this._connectingPromise) return this._connectingPromise;
+    this._connectingPromise = this._doConnectLobstr().finally(() => {
+      this._connectingPromise = null;
+    });
+    return this._connectingPromise;
+  }
+
+  private async _doConnectLobstr(): Promise<StellarWallet> {
+    const provider = resolveLobstrProvider();
+    if (!provider) {
+      throw new Error(
+        "Lobstr wallet is not installed or unavailable. " +
+          "Visit https://lobstr.co to install it."
+      );
+    }
+
+    let result: { publicKey: string };
+    try {
+      result = await provider.connect();
+    } catch (err: unknown) {
+      throw friendlyError(err, "Failed to connect to Lobstr. Please try again.");
+    }
+
+    if (!result || typeof result !== "object") {
+      throw new Error("Lobstr returned an unexpected response. Please try again.");
+    }
+
+
+    const publicKey = (result as any).publicKey;
+    if (typeof publicKey !== "string" || publicKey.trim() === "") {
+      throw new Error(
+        "Lobstr did not return a valid public key. " +
+          "Ensure your wallet is unlocked and try again."
+      );
+    }
+
+    return this._store("lobstr", publicKey.trim());
+  }
+
+  // ── connectAuto ───────────────────────────────────────────────────────────────
+
+  /**
+   * Attempts Freighter first. If the extension is not installed or unavailable,
+   * falls back to Lobstr. Throws a clear, user-friendly error if neither wallet
+   * is present.
+   *
+   * Idempotent: returns the stored wallet immediately if already connected.
+   * Race-condition safe: concurrent calls share one in-flight promise.
+   */
+  connectAuto(): Promise<StellarWallet> {
+    // Already connected — return immediately without any provider calls.
+    if (this._walletType && this._publicKey) {
+      return Promise.resolve({
+        type: this._walletType,
+        publicKey: this._publicKey,
+        isConnected: true,
+      });
+    }
+
+    // Collapse concurrent calls.
+    if (this._connectingPromise) return this._connectingPromise;
+
+    this._connectingPromise = this._doConnectAuto().finally(() => {
+      this._connectingPromise = null;
+    });
+    return this._connectingPromise;
+  }
+
+  private async _doConnectAuto(): Promise<StellarWallet> {
+    // Try Freighter first.
+    if (await this.isFreighterAvailable()) {
+      return this._doConnectFreighter();
+    }
+
+    // Fall back to Lobstr.
+    if (this.isLobstrAvailable()) {
+      return this._doConnectLobstr();
+    }
+
+    throw new Error(
+      "No Stellar wallet found. Please install Freighter (https://freighter.app) " +
+        "or Lobstr (https://lobstr.co)."
+    );
+
+
+    return this._store("freighter", retryResult.address);
+
 
 
     if (!publicKey) {
@@ -446,7 +435,6 @@ export class StellarWalletAdapter {
   }
 
 
-
   async signTransaction(xdr: string): Promise<string> {
 
     if (!this._walletType || !this._publicKey) {
@@ -454,6 +442,17 @@ export class StellarWalletAdapter {
     }
 
     if (this._walletType === "freighter") {
+
+      return this._signWithFreighter(xdr);
+    }
+
+    return this._signWithLobstr(xdr);
+  }
+
+  private async _signWithFreighter(xdr: string): Promise<string> {
+    const result = await freighterApi.signTransaction(xdr, {
+      networkPassphrase: MAINNET_PASSPHRASE,
+
       const result = await freighterApi.signTransaction(xdr, {
         networkPassphrase: MAINNET_PASSPHRASE,
       });
@@ -525,10 +524,53 @@ export class StellarWalletAdapter {
     if (!src) throw new Error('Lobstr not available');
     const result = await src.signTransaction(xdr, {
       networkPassphrase: 'Public Global Stellar Network ; September 2015',
+
     });
+
+
+    if (result.error) {
+      throw friendlyError(result.error, "Transaction signing failed. Please try again.");
+    }
+    if (!result.signedTxXdr) {
+      throw new Error(
+        "Freighter returned an empty signed transaction. Please try again."
+      );
+    }
+    return result.signedTxXdr;
+  }
+
+  private async _signWithLobstr(xdr: string): Promise<string> {
+    // Re-resolve at call time — the provider may have been removed mid-session.
+    const provider = resolveLobstrProvider();
+    if (!provider) {
+      throw new Error(
+        "Lobstr is no longer available. Please reconnect your wallet."
+      );
+    }
+
+    let signResult: { signedXdr: string };
+    try {
+      signResult = await provider.signTransaction(xdr, {
+        networkPassphrase: MAINNET_PASSPHRASE,
+      });
+    } catch (err: unknown) {
+      throw friendlyError(err, "Transaction signing failed. Please try again.");
+    }
+
+    if (!signResult?.signedXdr) {
+      throw new Error(
+        "Lobstr returned an empty signed transaction. Please try again."
+      );
+    }
+    return signResult.signedXdr;
+  }
+
+  // ── State accessors ───────────────────────────────────────────────────────────
+
     return result.signedXdr;
 
   }
+
 
 
 
