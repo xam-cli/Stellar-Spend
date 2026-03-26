@@ -12,7 +12,18 @@ import { validateAmount, validateAccountNumber } from "@/lib/offramp/utils/valid
 
 // ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+
+interface GasFeeOptions {
+  native: { int: string; float: string } | null;
+  stablecoin: { int: string; float: string } | null;
+}
+
+export interface FeeOption {
+  label: string;
+  amount: string;
+  method: "USDC" | "XLM";
+}
 
 export interface FeeOption {
   label: string;
@@ -348,11 +359,13 @@ export default function FormCard({
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [quote, setQuote] = useState<QuoteResult | null>(null);
+  const [gasFees, setGasFees] = useState<GasFeeOptions | null>(null);
 
   const [isCurrenciesLoading, setIsCurrenciesLoading] = useState(false);
   const [isInstitutionsLoading, setIsInstitutionsLoading] = useState(false);
   const [isQuoteLoading, setIsQuoteLoading] = useState(false);
   const [isVerifyingAccount, setIsVerifyingAccount] = useState(false);
+  const [isGasFeesLoading, setIsGasFeesLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [amountError, setAmountError] = useState("");
@@ -378,6 +391,50 @@ export default function FormCard({
     setVerifyError("");
   }, [resetKey]);
 
+  // ---------------------------------------------------------------------------
+  // Fetch currencies on mount
+  // -----------------------------------------------------------------------------
+  useEffect(() => {
+    setIsCurrenciesLoading(true);
+    fetch("/api/offramp/currencies")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setCurrencies(data);
+          // Default to NGN if available (per issue #70)
+          const hasNGN = data.some((c: Currency) => c.code === 'NGN');
+          if (hasNGN) {
+            setCurrency('NGN');
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsCurrenciesLoading(false));
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Fetch gas fee options on mount (per issue #69)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const fetchGasFees = async () => {
+      setIsGasFeesLoading(true);
+      try {
+        const res = await fetch('/api/offramp/bridge/gas-fee-options');
+        const data = await res.json();
+        setGasFees(data);
+      } catch (error) {
+        console.error('Failed to fetch gas fees:', error);
+        setGasFees(null);
+      } finally {
+        setIsGasFeesLoading(false);
+      }
+    };
+    fetchGasFees();
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Fetch institutions when currency changes
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     setIsCurrenciesLoading(true);
     fetch("/api/offramp/currencies")
@@ -574,9 +631,9 @@ export default function FormCard({
         <FeeMethodSelector
           value={feeMethod}
           onChange={handleFeeMethodChange}
-          usdcFee="~0.50 USDC"
-          xlmFee="~0.001 XLM"
-          disabled={!isConnected || isSubmitting}
+          usdcFee={gasFees?.stablecoin?.float || null}
+          xlmFee={gasFees?.native?.float || null}
+          disabled={!isConnected}
         />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
