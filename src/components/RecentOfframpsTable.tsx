@@ -129,3 +129,4 @@ export default function RecentOfframpsTable({ rows = MOCK_ROWS }: RecentOfframps
     </div>
   );
 }
+

@@ -12,6 +12,7 @@ import { useStellarWallet } from "@/hooks/useStellarWallet";
 import { useWalletFlow } from "@/hooks/useWalletFlow";
  main
 import { OfframpStep } from "@/types/stellaramp";
+import { useStellarWallet } from "@/hooks/useStellarWallet";
 import { TransactionStorage, type Transaction } from "@/lib/transaction-storage";
 
 export default function Home() {
@@ -22,6 +23,8 @@ export default function Home() {
   const [currency, setCurrency] = useState("");
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [modalStep, setModalStep] = useState<OfframpStep>("idle");
+  const [currentPayload, setCurrentPayload] = useState<OfframpPayload | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
 
   const isConnected = !!wallet;
 
@@ -83,7 +86,7 @@ export default function Home() {
   }, [setModalStep]);
  main
     }
-  }, []);
+  }, [wallet?.publicKey]);
 
   return (
     <main className="min-h-screen p-4 bg-[#0a0a0a]">
