@@ -13,18 +13,19 @@ const TERMINAL_STATES: PayoutStatus[] = ['validated', 'settled', 'refunded', 'ex
 interface PollPayoutStatusOptions {
   transactionId: string;
   onStepChange: (step: OfframpStep) => void;
+  onSettling?: () => void;
 }
 
 /**
  * Polls GET /api/offramp/status/{orderId} every 10 s, up to 60 attempts (10 min).
- * - "validated" | "settled" → advances modal to "settling", resolves
- * - "refunded" | "expired"  → throws with descriptive error
- * - Timeout                 → throws "Payout polling timeout"
- * Updates TransactionStorage on each poll.
+ * - "validated" | "settled"  → calls onSettling(), resolves
+ * - "refunded" | "expired"   → rejects with descriptive error
+ * - Timeout                  → rejects with "Payout polling timeout"
+ * Updates TransactionStorage on every poll.
  */
 export function usePollPayoutStatus() {
   const pollPayoutStatus = useCallback(
-    async (orderId: string, { transactionId, onStepChange }: PollPayoutStatusOptions): Promise<void> => {
+    async (orderId: string, { transactionId, onSettling }: PollPayoutStatusOptions): Promise<void> => {
       let attempts = 0;
 
       while (attempts < MAX_ATTEMPTS) {
