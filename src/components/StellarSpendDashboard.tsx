@@ -176,6 +176,40 @@ export default function StellarSpendDashboard() {
   }
 
   // ---------------------------------------------------------------------------
+  // Soroban tx status poller (for PENDING status)
+  // ---------------------------------------------------------------------------
+  async function pollSorobanTx(txHash: string): Promise<void> {
+    const maxAttempts = 30;
+    const interval = 3000;
+    let attempt = 0;
+
+    while (attempt < maxAttempts) {
+      if (abortRef.current) throw new Error("Polling cancelled");
+      
+      attempt++;
+      const res = await fetch(`/api/offramp/bridge/tx-status/${txHash}`);
+      const data = await res.json();
+      const status = data.status ?? "NOT_FOUND";
+
+      if (status === "SUCCESS") {
+        return;
+      }
+      if (status === "FAILED") {
+        throw new Error("Transaction failed on-chain. Your wallet was not debited.");
+      }
+      if (status === "NOT_FOUND") {
+        // Keep polling, tx may not be indexed yet
+        await new Promise(resolve => setTimeout(resolve, interval));
+        continue;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, interval));
+    }
+
+    throw new Error("Transaction was not confirmed within 90s. It may have expired.");
+  }
+
+  // ---------------------------------------------------------------------------
   // Bridge status poller
   // ---------------------------------------------------------------------------
   async function pollBridge(txHash: string, txId: string): Promise<void> {
@@ -287,16 +321,21 @@ export default function StellarSpendDashboard() {
 
         // Step 3 — submit to network
         setModalStep("submitting");
-        const submitRes = await fetch("/api/offramp/bridge/build-tx", {
+        const submitRes = await fetch("/api/offramp/bridge/submit-soroban", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ signedXdr, submit: true }),
+          body: JSON.stringify({ signedXdr }),
         });
         const submitData = await submitRes.json();
         if (!submitRes.ok) throw new Error(submitData.error ?? "Failed to submit transaction");
 
-        const { txHash } = submitData as { txHash: string };
+        const { status: submitStatus, hash: txHash } = submitData as { status: string; hash: string };
         TransactionStorage.update(txId, { stellarTxHash: txHash });
+
+        // If PENDING, poll until SUCCESS/FAILED
+        if (submitStatus === "PENDING") {
+          await pollSorobanTx(txHash);
+        }
 
         // Step 4 — poll bridge status
         setModalStep("processing");
