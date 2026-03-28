@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { paycrestOrderLimiter, getClientIp } from '@/lib/offramp/utils/rate-limiter';
+import { generateRequestId, createRequestLogger } from '@/lib/offramp/utils/logger';
+
+export const maxDuration = 20;
 
 interface PaycrestOrderRequest {
   amount: number;
@@ -81,7 +85,27 @@ class PaycrestAdapter {
  * }
  */
 export async function POST(req: NextRequest) {
+  const requestId = generateRequestId();
+  const clientIp = getClientIp(req);
+  const logger = createRequestLogger(requestId, 'POST', '/api/offramp/paycrest/order');
+
   try {
+    // Check rate limit
+    const rateLimitCheck = paycrestOrderLimiter.check(clientIp);
+    if (!rateLimitCheck.allowed) {
+      logger.logError(429, 'Rate limit exceeded');
+      return NextResponse.json(
+        { error: 'Too many requests' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimitCheck.retryAfter),
+            'X-Request-Id': requestId,
+          },
+        }
+      );
+    }
+
     const body = await req.json();
     const { amount, rate, token, network, reference, returnAddress, recipient } = body;
 
@@ -139,9 +163,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (Object.keys(errors).length > 0) {
+      logger.logError(400, 'Validation failed');
       return NextResponse.json(
         { error: 'Validation failed', details: errors },
-        { status: 400 }
+        { status: 400, headers: { 'X-Request-Id': requestId } }
       );
     }
 
@@ -159,19 +184,27 @@ export async function POST(req: NextRequest) {
       recipient,
     });
 
-    return NextResponse.json({ data: order });
+    const response = NextResponse.json({ data: order });
+    response.headers.set('X-Request-Id', requestId);
+    logger.logSuccess(200);
+    return response;
   } catch (err: unknown) {
     console.error('Error creating Paycrest order:', err);
 
     if (err instanceof Error && 'status' in err) {
       const httpError = err as PaycrestHttpError;
+      logger.logError(httpError.status, err.message);
       return NextResponse.json(
         { error: err.message },
-        { status: httpError.status }
+        { status: httpError.status, headers: { 'X-Request-Id': requestId } }
       );
     }
 
     const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    logger.logError(500, message);
+    return NextResponse.json(
+      { error: message },
+      { status: 500, headers: { 'X-Request-Id': requestId } }
+    );
   }
 }
