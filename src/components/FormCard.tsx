@@ -8,7 +8,7 @@ import {
   type ChangeEvent,
 } from "react";
 import { cn } from "@/lib/cn";
-import { validateAmount, validateAccountNumber, isValidQuote } from "@/lib/offramp/utils/validation";
+import { validateAmount, validateAccountNumber, isValidQuote, validateEvmAddress } from "@/lib/offramp/utils/validation";
 import { buildQuote, calculateBridgeAmount } from "@/lib/offramp/utils/quote-fetcher";
 
 // ---------------------------------------------------------------------------
@@ -615,6 +615,16 @@ export default function FormCard({
 
   async function handleSubmitForm() {
     if (!isFormValid || !quote) return;
+    
+    // Validate NEXT_PUBLIC_BASE_RETURN_ADDRESS before proceeding
+    const baseReturnAddress = process.env.NEXT_PUBLIC_BASE_RETURN_ADDRESS;
+    if (!baseReturnAddress) {
+      throw new Error("NEXT_PUBLIC_BASE_RETURN_ADDRESS is missing");
+    }
+    if (!validateEvmAddress(baseReturnAddress)) {
+      throw new Error("NEXT_PUBLIC_BASE_RETURN_ADDRESS is not a valid EVM address");
+    }
+    
     setIsSubmitting(true);
     try {
       await onSubmit({

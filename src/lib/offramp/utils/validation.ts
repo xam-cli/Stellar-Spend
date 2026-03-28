@@ -10,6 +10,10 @@ export function validateAddress(address: string, chain: 'stellar' | 'base'): boo
   return false;
 }
 
+export function validateEvmAddress(address: string): boolean {
+  return /^0x[a-fA-F0-9]{40}$/.test(address);
+}
+
 export function validateAccountNumber(accountNumber: string): boolean {
   return /^\d{10}$/.test(accountNumber);
 }
