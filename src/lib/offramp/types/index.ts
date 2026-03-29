@@ -45,6 +45,7 @@ export interface BeneficiaryInfo {
   accountName: string;
   currency: string;
   memo?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface ExecuteRequest {
@@ -96,6 +97,7 @@ export interface PayoutOrderRequest {
   network: string;
   rate: number;
   recipient: BeneficiaryInfo;
+  reference: string;
   returnAddress: string;
 }
 

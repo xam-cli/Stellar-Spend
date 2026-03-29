@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { ErrorHandler } from '@/lib/error-handler';
+import { withPaycrestTimeout } from '@/lib/offramp/utils/timeout';
 
 export const maxDuration = 10;
 
@@ -18,12 +20,15 @@ class PaycrestAdapter {
   }
 
   async getCurrencies(): Promise<Currency[]> {
-    const response = await fetch(`${this.apiUrl}/currencies`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'API-Key': this.apiKey,
-      },
-    });
+    const response = await withPaycrestTimeout(
+      fetch(`${this.apiUrl}/currencies`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'API-Key': this.apiKey,
+        },
+      }),
+      'get_currencies'
+    );
 
     if (!response.ok) {
       throw new Error(`Failed to fetch currencies: ${response.status}`);
@@ -91,9 +96,6 @@ export async function GET() {
     );
   } catch (error) {
     console.error('Error fetching currencies from Paycrest:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch currencies' },
-      { status: 500 }
-    );
+    return ErrorHandler.handle(error);
   }
 }

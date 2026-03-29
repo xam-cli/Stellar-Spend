@@ -5,54 +5,9 @@ import { generateRequestId, createRequestLogger } from '@/lib/offramp/utils/logg
 
 export const maxDuration = 20;
 
-interface PaycrestOrderRequest {
-  amount: number;
-  rate: number;
-  token: string;
-  network: string;
-  reference: string;
-  returnAddress: string;
-  recipient: {
-    institution: string;
-    accountIdentifier: string;
-    accountName: string;
-    currency: string;
-  };
-}
+import { PayoutOrderRequest } from '@/lib/offramp/types';
 
-interface PaycrestHttpError extends Error {
-  status: number;
-}
-
-class PaycrestAdapter {
-  private apiKey: string;
-  private apiUrl = 'https://api.paycrest.io/v1';
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
-  async createOrder(payload: PaycrestOrderRequest) {
-    const response = await fetch(`${this.apiUrl}/sender/orders`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'API-Key': this.apiKey,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      const error = new Error(data?.message ?? 'Failed to create Paycrest order') as PaycrestHttpError;
-      error.status = response.status;
-      throw error;
-    }
-
-    return data;
-  }
-}
+import { PaycrestAdapter, PaycrestHttpError } from '@/lib/offramp/adapters/paycrest-adapter';
 
 /**
  * POST /api/offramp/paycrest/order
@@ -182,7 +137,7 @@ export async function POST(req: NextRequest) {
       reference,
       returnAddress,
       recipient,
-    });
+    } as PayoutOrderRequest);
 
     const response = NextResponse.json({ data: order });
     response.headers.set('X-Request-Id', requestId);

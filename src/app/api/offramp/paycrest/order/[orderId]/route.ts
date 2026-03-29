@@ -3,38 +3,7 @@ import { env } from '@/lib/env';
 
 export const maxDuration = 10;
 
-interface PaycrestHttpError extends Error {
-  status: number;
-}
-
-class PaycrestAdapter {
-  private apiKey: string;
-  private apiUrl = 'https://api.paycrest.io/v1';
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
-  async getOrderStatus(orderId: string) {
-    const response = await fetch(`${this.apiUrl}/sender/orders/${orderId}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'API-Key': this.apiKey,
-      },
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      const error = new Error(data?.message ?? 'Failed to fetch order status') as PaycrestHttpError;
-      error.status = response.status;
-      throw error;
-    }
-
-    return data;
-  }
-}
+import { PaycrestAdapter, PaycrestHttpError } from '@/lib/offramp/adapters/paycrest-adapter';
 
 /**
  * GET /api/offramp/paycrest/order/[orderId]
