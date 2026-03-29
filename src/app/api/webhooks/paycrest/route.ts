@@ -1,19 +1,9 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import type { PayoutStatus } from '@/lib/offramp/types';
+import { mapPaycrestStatus } from '@/lib/offramp/utils/mapPaycrestStatus';
 
 export const maxDuration = 10;
-
-function mapPaycrestStatus(eventType: string): PayoutStatus | null {
-  switch (eventType) {
-    case 'payment_order.pending':      return 'pending';
-    case 'payment_order.validated':    return 'validated';
-    case 'payment_order.settled':      return 'settled';
-    case 'payment_order.refunded':     return 'refunded';
-    case 'payment_order.expired':      return 'expired';
-    default:                           return null;
-  }
-}
 
 async function verifySignature(rawBody: string, signature: string, secret: string): Promise<boolean> {
   const encoder = new TextEncoder();
