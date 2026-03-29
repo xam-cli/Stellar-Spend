@@ -1,85 +1,67 @@
 import { NextResponse } from 'next/server';
-import { ErrorHandler } from '@/lib/error-handler';
+import { env } from '@/lib/env';
 
-const PAYCREST_API_URL = process.env.PAYCREST_API_URL || 'https://api.paycrest.io/v1';
+export const maxDuration = 10;
 
-interface VerifyAccountRequest {
-  institution: string;
-  accountIdentifier: string;
-  currency?: string;
+interface PaycrestHttpError extends Error {
+  status: number;
 }
 
-/**
- * POST /api/offramp/verify-account
- * 
- * Verifies a bank account via Paycrest API.
- * Returns the account holder's name if verification is successful.
- */
-export async function POST(request: Request) {
-  try {
-    const body: VerifyAccountRequest = await request.json();
-    const { institution, accountIdentifier, currency = 'NGN' } = body;
+class PaycrestAdapter {
+  private apiKey: string;
+  private apiUrl = 'https://api.paycrest.io/v1';
 
-    if (!institution || !accountIdentifier) {
-      return ErrorHandler.validation('Institution and account identifier are required', 'institution');
-    }
+  constructor(apiKey: string) {
+    this.apiKey = apiKey;
+  }
 
-    const apiKey = process.env.PAYCREST_API_KEY;
-    
-    if (!apiKey) {
-      console.warn('PAYCREST_API_KEY not configured, cannot verify account');
-      // Return mock response for development
-      return NextResponse.json({
-        accountName: '',
-        valid: false,
-        message: 'Account verification not available',
-      });
-    }
-
-    const response = await fetch(`${PAYCREST_API_URL}/verify-account`, {
+  async verifyAccount(institution: string, accountIdentifier: string): Promise<string> {
+    const response = await fetch(`${this.apiUrl}/verify-account`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
+        'API-Key': this.apiKey,
       },
-      body: JSON.stringify({
-        institution,
-        accountIdentifier,
-        currency,
-      }),
+      body: JSON.stringify({ institution, accountIdentifier }),
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('Paycrest API error (verify-account):', response.status, error);
-      
-      // Return empty account name for invalid accounts (not an error toast)
-      return NextResponse.json({
-        accountName: '',
-        valid: false,
-        message: 'Account verification failed',
-      });
-    }
 
     const data = await response.json();
-    
-    // Extract account name from Paycrest response
-    // Expected formats:
-    // - { accountName: "JOHN DOE" }
-    // - { data: { accountName: "JOHN DOE" } }
-    // - { data: "JOHN DOE" }
-    const accountName = data.accountName 
-      ?? data.data?.accountName 
-      ?? data.data?.account_name 
-      ?? data.data 
-      ?? '';
 
-    return NextResponse.json({
-      accountName: String(accountName),
-      valid: !!accountName,
-    });
-  } catch (error) {
-    console.error('Error verifying account via Paycrest:', error);
-    return ErrorHandler.handle(error);
+    if (!response.ok) {
+      const error = new Error(data?.message ?? `Verification failed: ${response.status}`) as PaycrestHttpError;
+      error.status = response.status;
+      throw error;
+    }
+
+    return data.accountName ?? data.data?.accountName ?? data.data?.account_name ?? String(data.data ?? '');
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { institution, accountIdentifier } = body;
+
+    if (!institution || !accountIdentifier) {
+      return NextResponse.json(
+        { error: 'institution and accountIdentifier are required' },
+        { status: 400 }
+      );
+    }
+
+    const paycrest = new PaycrestAdapter(env.server.PAYCREST_API_KEY);
+    const accountName = await paycrest.verifyAccount(institution, accountIdentifier);
+
+    return NextResponse.json({ accountName });
+  } catch (err: unknown) {
+    console.error('Error verifying account via Paycrest:', err);
+
+    if (err instanceof Error && 'status' in err) {
+      const httpError = err as PaycrestHttpError;
+      const status = httpError.status >= 500 ? 502 : 400;
+      return NextResponse.json({ error: err.message }, { status });
+    }
+
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

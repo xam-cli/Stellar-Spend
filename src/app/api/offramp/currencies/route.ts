@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { ErrorHandler } from '@/lib/error-handler';
 
+export const maxDuration = 10;
+
 interface Currency {
   code: string;
   name: string;
@@ -33,15 +35,15 @@ class PaycrestAdapter {
     // Transform Paycrest response to our format
     const currencies = Array.isArray(data)
       ? data.map((c: any) => ({
-          code: c.code || c.currency || '',
-          name: c.name || '',
-          symbol: c.symbol || '',
-        }))
+        code: c.code || c.currency || '',
+        name: c.name || '',
+        symbol: c.symbol || '',
+      }))
       : data.currencies?.map((c: any) => ({
-          code: c.code || c.currency || '',
-          name: c.name || '',
-          symbol: c.symbol || '',
-        })) || [];
+        code: c.code || c.currency || '',
+        name: c.name || '',
+        symbol: c.symbol || '',
+      })) || [];
 
     return currencies;
   }

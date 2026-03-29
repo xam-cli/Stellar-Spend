@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { validateAmount, validateAddress } from '@/lib/offramp/utils/validation';
 import { extractErrorMessage } from '@/lib/offramp/utils/errors';
+import { buildTxLimiter, getClientIp } from '@/lib/offramp/utils/rate-limiter';
+import { generateRequestId, createRequestLogger } from '@/lib/offramp/utils/logger';
 
 export const maxDuration = 30;
 
@@ -26,36 +28,60 @@ export const maxDuration = 30;
  * }
  */
 export async function POST(request: NextRequest) {
+  const requestId = generateRequestId();
+  const clientIp = getClientIp(request);
+  const logger = createRequestLogger(requestId, 'POST', '/api/offramp/bridge/build-tx');
+
   try {
+    // Check rate limit
+    const rateLimitCheck = buildTxLimiter.check(clientIp);
+    if (!rateLimitCheck.allowed) {
+      logger.logError(429, 'Rate limit exceeded');
+      return NextResponse.json(
+        { error: 'Too many requests' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimitCheck.retryAfter),
+            'X-Request-Id': requestId,
+          },
+        }
+      );
+    }
+
     const body = await request.json();
     const { amount, fromAddress, toAddress, feePaymentMethod = 'stablecoin' } = body;
 
     // Validate inputs
     if (!validateAmount(amount)) {
+      logger.logError(400, 'Invalid amount: must be a positive number');
       return NextResponse.json(
         { error: 'Invalid amount: must be a positive number' },
-        { status: 400 }
+        { status: 400, headers: { 'X-Request-Id': requestId } }
       );
     }
 
     if (!validateAddress(fromAddress, 'stellar')) {
+      logger.logError(400, 'Invalid Stellar address');
       return NextResponse.json(
         { error: 'Invalid Stellar address' },
-        { status: 400 }
+        { status: 400, headers: { 'X-Request-Id': requestId } }
       );
     }
 
     if (!validateAddress(toAddress, 'base')) {
+      logger.logError(400, 'Invalid Base address');
       return NextResponse.json(
         { error: 'Invalid Base address' },
-        { status: 400 }
+        { status: 400, headers: { 'X-Request-Id': requestId } }
       );
     }
 
     if (!['native', 'stablecoin'].includes(feePaymentMethod)) {
+      logger.logError(400, 'Invalid feePaymentMethod: must be "native" or "stablecoin"');
       return NextResponse.json(
         { error: 'Invalid feePaymentMethod: must be "native" or "stablecoin"' },
-        { status: 400 }
+        { status: 400, headers: { 'X-Request-Id': requestId } }
       );
     }
 
@@ -90,9 +116,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (!stellarChain || !baseChain) {
+      logger.logError(500, 'Failed to fetch chain details from Allbridge');
       return NextResponse.json(
         { error: 'Failed to fetch chain details from Allbridge' },
-        { status: 500 }
+        { status: 500, headers: { 'X-Request-Id': requestId } }
       );
     }
 
@@ -101,9 +128,10 @@ export async function POST(request: NextRequest) {
     const destinationToken = baseChain.tokens.find((t: any) => t.symbol === 'USDC');
 
     if (!sourceToken || !destinationToken) {
+      logger.logError(500, 'USDC token not found on one or both chains');
       return NextResponse.json(
         { error: 'USDC token not found on one or both chains' },
-        { status: 500 }
+        { status: 500, headers: { 'X-Request-Id': requestId } }
       );
     }
 
@@ -123,7 +151,7 @@ export async function POST(request: NextRequest) {
       selectedFee
     );
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       xdr,
       sourceToken: {
         symbol: sourceToken.symbol,
@@ -138,6 +166,9 @@ export async function POST(request: NextRequest) {
         chain: destinationToken.chain,
       },
     });
+    response.headers.set('X-Request-Id', requestId);
+    logger.logSuccess(200);
+    return response;
   } catch (error) {
     console.error('Build TX error:', error);
 
@@ -145,19 +176,25 @@ export async function POST(request: NextRequest) {
 
     // Parse common simulation errors
     if (message.includes('insufficient') || message.includes('reserve')) {
+      logger.logError(500, 'Insufficient XLM reserve for transaction');
       return NextResponse.json(
         { error: 'Insufficient XLM reserve for transaction' },
-        { status: 500 }
+        { status: 500, headers: { 'X-Request-Id': requestId } }
       );
     }
 
     if (message.includes('Invalid')) {
-      return NextResponse.json({ error: message }, { status: 400 });
+      logger.logError(400, message);
+      return NextResponse.json(
+        { error: message },
+        { status: 400, headers: { 'X-Request-Id': requestId } }
+      );
     }
 
+    logger.logError(500, message);
     return NextResponse.json(
       { error: 'Failed to build transaction' },
-      { status: 500 }
+      { status: 500, headers: { 'X-Request-Id': requestId } }
     );
   }
 }
