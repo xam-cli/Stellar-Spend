@@ -18,13 +18,16 @@ export function mapPaycrestStatus(webhookStatus: string): PayoutStatus {
 }
 
 export class PaycrestHttpError extends Error {
-  constructor(
-    public message: string,
-    public status: number,
-    public details?: any
-  ) {
+  status: number;
+  details: unknown;
+
+  constructor(message: string, status: number, details?: unknown) {
     super(message);
     this.name = 'PaycrestHttpError';
+    this.status = status;
+    this.details = details;
+    // Restore correct prototype chain for instanceof checks across transpilation boundaries
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
