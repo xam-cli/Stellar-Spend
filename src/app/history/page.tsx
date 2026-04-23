@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { TransactionStorage, type Transaction } from "@/lib/transaction-storage";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
 import Header from "@/components/Header";
+import ExportControls from "@/components/ExportControls";
 import { cn } from "@/lib/cn";
 
 function formatDate(timestamp: number): string {
@@ -123,7 +124,9 @@ export default function HistoryPage() {
             <p className="text-sm text-[#777777]">No transactions found</p>
           </div>
         ) : (
-          <div className="border border-[#333333] bg-[#111111] overflow-x-auto">
+          <>
+            <ExportControls transactions={transactions} walletAddress={wallet?.publicKey} />
+            <div className="border border-[#333333] bg-[#111111] overflow-x-auto mt-4">
             <table className="w-full min-w-[800px] border-collapse">
               <thead>
                 <tr className="bg-[#c9a962]">
@@ -181,6 +184,7 @@ export default function HistoryPage() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </section>
     </main>
