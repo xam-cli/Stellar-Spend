@@ -43,6 +43,7 @@ const securityHeaders = [
 const externalServerPackages = [
   "@allbridge/bridge-core-sdk",
   "@stellar/stellar-sdk",
+  "pg",
 ] as const;
 
 const nextConfig: NextConfig = {
