@@ -20,10 +20,20 @@ export interface Transaction {
     accountName: string;
     currency: string;
   };
-  status: 'pending' | 'completed' | 'failed';
+  status: 'pending' | 'completed' | 'failed' | 'reversed' | 'partially_reversed';
   error?: string;
   /** User-supplied note for this transaction (max 500 chars) */
   note?: string;
+  /** Reversal information */
+  reversal?: {
+    id: string;
+    timestamp: number;
+    amount: string;
+    reason: string;
+    status: 'pending' | 'completed' | 'failed';
+  };
+  /** Whether this transaction is marked as favorite */
+  isFavorite?: boolean;
 }
 
 const STORAGE_KEY = 'stellar_spend_transactions';
@@ -76,5 +86,48 @@ export class TransactionStorage {
 
   static generateId(): string {
     return `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  static isReversalEligible(tx: Transaction): boolean {
+    return tx.status === 'completed' && !tx.reversal;
+  }
+
+  static reverse(id: string, amount: string, reason: string): void {
+    const tx = this.getById(id);
+    if (!tx || !this.isReversalEligible(tx)) return;
+    
+    this.update(id, {
+      reversal: {
+        id: `rev_${Date.now()}`,
+        timestamp: Date.now(),
+        amount,
+        reason,
+        status: 'pending',
+      },
+      status: parseFloat(amount) === parseFloat(tx.amount) ? 'reversed' : 'partially_reversed',
+    });
+  }
+
+  static updateReversalStatus(id: string, status: 'pending' | 'completed' | 'failed'): void {
+    const tx = this.getById(id);
+    if (!tx?.reversal) return;
+    
+    this.update(id, {
+      reversal: { ...tx.reversal, status },
+    });
+  }
+
+  static toggleFavorite(id: string): void {
+    const tx = this.getById(id);
+    if (!tx) return;
+    this.update(id, { isFavorite: !tx.isFavorite });
+  }
+
+  static getFavorites(): Transaction[] {
+    return this.getAll().filter(tx => tx.isFavorite);
+  }
+
+  static getFavoritesByUser(userAddress: string): Transaction[] {
+    return this.getByUser(userAddress).filter(tx => tx.isFavorite);
   }
 }
