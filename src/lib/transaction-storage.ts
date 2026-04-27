@@ -32,6 +32,8 @@ export interface Transaction {
     reason: string;
     status: 'pending' | 'completed' | 'failed';
   };
+  /** Whether this transaction is marked as favorite */
+  isFavorite?: boolean;
 }
 
 const STORAGE_KEY = 'stellar_spend_transactions';
@@ -113,5 +115,19 @@ export class TransactionStorage {
     this.update(id, {
       reversal: { ...tx.reversal, status },
     });
+  }
+
+  static toggleFavorite(id: string): void {
+    const tx = this.getById(id);
+    if (!tx) return;
+    this.update(id, { isFavorite: !tx.isFavorite });
+  }
+
+  static getFavorites(): Transaction[] {
+    return this.getAll().filter(tx => tx.isFavorite);
+  }
+
+  static getFavoritesByUser(userAddress: string): Transaction[] {
+    return this.getByUser(userAddress).filter(tx => tx.isFavorite);
   }
 }
